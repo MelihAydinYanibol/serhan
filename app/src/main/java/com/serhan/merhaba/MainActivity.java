@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TableLayout;
 import android.widget.TableRow;
@@ -33,28 +34,41 @@ public class MainActivity extends Activity {
 
     private static final int VURGU_RENGI = Color.parseColor("#1E88E5");
     private static final int HAFTA_SONU_RENGI = Color.parseColor("#E53935");
+    private static final String KUR_IPUCU = "Euro efektif alış kurunu görmek için bir güne dokunun.";
 
     private final ExecutorService arkaPlan = Executors.newSingleThreadExecutor();
-    /** Gün -> kur sonucu önbelleği (aynı gün tekrar tıklanınca yeniden indirilmez). */
+    /** Tarih anahtarı (yyyyMMdd) -> kur sonucu önbelleği; aynı gün tekrar indirilmez. */
     private final Map<Integer, TcmbKur.Sonuc> onbellek = new HashMap<>();
 
+    /** Bugünün tarih anahtarı (yyyyMMdd). */
+    private int bugunAnahtar;
+    private int bugununYili;
+    private int bugununAyi;
+
+    /** Takvimde gösterilen ay. */
     private int yil;
     private int ay;
-    private int bugununGunu;
 
+    private TextView ayBasligi;
+    private Button geriButonu;
+    private Button ileriButonu;
+    private TableLayout tablo;
     private TextView kurBilgisi;
+
     private TextView seciliHucre;
-    /** En son tıklanan gün; geç gelen eski yanıtların ekranı ezmemesi için. */
-    private int seciliGun;
+    /** En son tıklanan günün anahtarı; geç gelen eski yanıtların ekranı ezmemesi için. */
+    private int seciliAnahtar;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         Calendar bugun = Calendar.getInstance();
-        yil = bugun.get(Calendar.YEAR);
-        ay = bugun.get(Calendar.MONTH);
-        bugununGunu = bugun.get(Calendar.DAY_OF_MONTH);
+        bugununYili = bugun.get(Calendar.YEAR);
+        bugununAyi = bugun.get(Calendar.MONTH);
+        bugunAnahtar = anahtar(bugununYili, bugununAyi, bugun.get(Calendar.DAY_OF_MONTH));
+        yil = bugununYili;
+        ay = bugununAyi;
 
         LinearLayout ekran = new LinearLayout(this);
         ekran.setOrientation(LinearLayout.VERTICAL);
@@ -68,15 +82,20 @@ public class MainActivity extends Activity {
         merhaba.setGravity(Gravity.CENTER);
         ekran.addView(merhaba);
 
-        ekran.addView(takvimOlustur());
+        ekran.addView(baslikSatiriOlustur());
+
+        tablo = new TableLayout(this);
+        tablo.setStretchAllColumns(true);
+        ekran.addView(tablo, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         kurBilgisi = new TextView(this);
         kurBilgisi.setTextSize(18);
         kurBilgisi.setGravity(Gravity.CENTER);
         kurBilgisi.setPadding(0, dp(24), 0, 0);
-        kurBilgisi.setText("Euro efektif alış kurunu görmek için bir güne dokunun.");
         ekran.addView(kurBilgisi);
 
+        takvimiCiz();
         setContentView(ekran);
     }
 
@@ -86,32 +105,75 @@ public class MainActivity extends Activity {
         arkaPlan.shutdownNow();
     }
 
-    /** İçinde bulunulan ayın takvimini oluşturur (haftalar Pazartesi'den başlar). */
-    private LinearLayout takvimOlustur() {
+    /** "‹  Kasım 2026  ›" satırı. */
+    private LinearLayout baslikSatiriOlustur() {
+        LinearLayout satir = new LinearLayout(this);
+        satir.setOrientation(LinearLayout.HORIZONTAL);
+        satir.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams satirParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        satirParams.topMargin = dp(32);
+        satirParams.bottomMargin = dp(8);
+        satir.setLayoutParams(satirParams);
+
+        geriButonu = new Button(this);
+        geriButonu.setText("‹");
+        geriButonu.setTextSize(24);
+        geriButonu.setPadding(0, 0, 0, 0);
+        geriButonu.setContentDescription("Önceki ay");
+        geriButonu.setOnClickListener(v -> ayDegistir(-1));
+        satir.addView(geriButonu, new LinearLayout.LayoutParams(dp(56), dp(56)));
+
+        ayBasligi = new TextView(this);
+        ayBasligi.setTextSize(24);
+        ayBasligi.setTypeface(Typeface.DEFAULT_BOLD);
+        ayBasligi.setGravity(Gravity.CENTER);
+        satir.addView(ayBasligi, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        ileriButonu = new Button(this);
+        ileriButonu.setText("›");
+        ileriButonu.setTextSize(24);
+        ileriButonu.setPadding(0, 0, 0, 0);
+        ileriButonu.setContentDescription("Sonraki ay");
+        ileriButonu.setOnClickListener(v -> ayDegistir(1));
+        satir.addView(ileriButonu, new LinearLayout.LayoutParams(dp(56), dp(56)));
+
+        return satir;
+    }
+
+    private void ayDegistir(int fark) {
+        ay += fark;
+        if (ay < 0) {
+            ay = 11;
+            yil--;
+        } else if (ay > 11) {
+            ay = 0;
+            yil++;
+        }
+        takvimiCiz();
+    }
+
+    /** Gösterilen ayın takvimini (yeniden) çizer; haftalar Pazartesi'den başlar. */
+    private void takvimiCiz() {
+        seciliHucre = null;
+        seciliAnahtar = 0;
+        kurBilgisi.setText(KUR_IPUCU);
+
+        ayBasligi.setText(AYLAR[ay] + " " + yil);
+        // Gelecek aylarda TCMB kuru olmadığından içinde bulunulan aydan ileri gidilmez.
+        boolean buAy = yil == bugununYili && ay == bugununAyi;
+        ileriButonu.setEnabled(!buAy);
+        ileriButonu.setAlpha(buAy ? 0.3f : 1f);
+
+        tablo.removeAllViews();
+
         Calendar ayinIlkGunu = Calendar.getInstance();
         ayinIlkGunu.clear();
         ayinIlkGunu.set(yil, ay, 1);
         int gunSayisi = ayinIlkGunu.getActualMaximum(Calendar.DAY_OF_MONTH);
         // Calendar: Pazar=1 ... Cumartesi=7. Pazartesi=0 olacak şekilde çevir.
         int baslangic = (ayinIlkGunu.get(Calendar.DAY_OF_WEEK) + 5) % 7;
-
-        LinearLayout kutu = new LinearLayout(this);
-        kutu.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams kutuParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        kutuParams.topMargin = dp(32);
-        kutu.setLayoutParams(kutuParams);
-
-        TextView baslik = new TextView(this);
-        baslik.setText(AYLAR[ay] + " " + yil);
-        baslik.setTextSize(24);
-        baslik.setTypeface(Typeface.DEFAULT_BOLD);
-        baslik.setGravity(Gravity.CENTER);
-        baslik.setPadding(0, 0, 0, dp(16));
-        kutu.addView(baslik);
-
-        TableLayout tablo = new TableLayout(this);
-        tablo.setStretchAllColumns(true);
 
         TableRow gunBasliklari = new TableRow(this);
         for (int i = 0; i < 7; i++) {
@@ -129,13 +191,14 @@ public class MainActivity extends Activity {
         for (int gun = 1; gun <= gunSayisi; gun++) {
             TextView t = hucre(String.valueOf(gun));
             int sutun = (baslangic + gun - 1) % 7;
-            if (gun == bugununGunu) {
+            int gunAnahtar = anahtar(yil, ay, gun);
+            if (gunAnahtar == bugunAnahtar) {
                 t.setTextColor(Color.WHITE);
                 t.setTypeface(Typeface.DEFAULT_BOLD);
             } else if (sutun >= 5) {
                 t.setTextColor(HAFTA_SONU_RENGI);
             }
-            hucreArkaPlaniniAyarla(t, gun, false);
+            hucreArkaPlaniniAyarla(t, gunAnahtar, false);
 
             final int tiklananGun = gun;
             t.setClickable(true);
@@ -151,44 +214,44 @@ public class MainActivity extends Activity {
             while (satir.getChildCount() < 7) satir.addView(hucre(""));
             tablo.addView(satir);
         }
-
-        kutu.addView(tablo);
-        return kutu;
     }
 
     /** Bugün mavi dolgulu, seçili gün mavi çerçeveli gösterilir. */
-    private void hucreArkaPlaniniAyarla(TextView t, int gun, boolean secili) {
-        if (gun != bugununGunu && !secili) {
+    private void hucreArkaPlaniniAyarla(TextView t, int gunAnahtar, boolean secili) {
+        boolean bugunMu = gunAnahtar == bugunAnahtar;
+        if (!bugunMu && !secili) {
             t.setBackground(null);
             return;
         }
         GradientDrawable arka = new GradientDrawable();
         arka.setCornerRadius(dp(10));
-        if (gun == bugununGunu) arka.setColor(VURGU_RENGI);
+        if (bugunMu) arka.setColor(VURGU_RENGI);
         if (secili) {
-            arka.setStroke(dp(2), gun == bugununGunu ? Color.parseColor("#0D47A1") : VURGU_RENGI);
+            arka.setStroke(dp(2), bugunMu ? Color.parseColor("#0D47A1") : VURGU_RENGI);
         }
         t.setBackground(arka);
     }
 
     private void gunSecildi(TextView hucre, int gun) {
+        int gunAnahtar = anahtar(yil, ay, gun);
         if (seciliHucre != null) {
-            hucreArkaPlaniniAyarla(seciliHucre, seciliGun, false);
+            hucreArkaPlaniniAyarla(seciliHucre, seciliAnahtar, false);
         }
         seciliHucre = hucre;
-        seciliGun = gun;
-        hucreArkaPlaniniAyarla(hucre, gun, true);
+        seciliAnahtar = gunAnahtar;
+        hucreArkaPlaniniAyarla(hucre, gunAnahtar, true);
 
         String tarihYazisi = gun + " " + AYLAR[ay] + " " + yil;
+        String istenenTarih = String.format(Locale.ROOT, "%02d.%02d.%04d", gun, ay + 1, yil);
 
-        if (gun > bugununGunu) {
+        if (gunAnahtar > bugunAnahtar) {
             kurBilgisi.setText(tarihYazisi + "\nBu tarih için TCMB kuru henüz belli değil.");
             return;
         }
 
-        TcmbKur.Sonuc kayitli = onbellek.get(gun);
+        TcmbKur.Sonuc kayitli = onbellek.get(gunAnahtar);
         if (kayitli != null) {
-            kurGoster(tarihYazisi, kayitli);
+            kurGoster(tarihYazisi, istenenTarih, kayitli);
             return;
         }
 
@@ -210,10 +273,11 @@ public class MainActivity extends Activity {
             final String h = hata;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
-                if (s != null) onbellek.put(gun, s);
-                if (seciliGun != gun) return; // Kullanıcı bu arada başka bir güne dokundu.
+                if (s != null) onbellek.put(gunAnahtar, s);
+                // Kullanıcı bu arada başka bir güne ya da aya geçtiyse ekranı değiştirme.
+                if (seciliAnahtar != gunAnahtar) return;
                 if (s != null) {
-                    kurGoster(tarihYazisi, s);
+                    kurGoster(tarihYazisi, istenenTarih, s);
                 } else {
                     kurBilgisi.setText(tarihYazisi + "\n" + h);
                 }
@@ -221,14 +285,13 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void kurGoster(String tarihYazisi, TcmbKur.Sonuc s) {
+    private void kurGoster(String tarihYazisi, String istenenTarih, TcmbKur.Sonuc s) {
         StringBuilder yazi = new StringBuilder();
         yazi.append(tarihYazisi)
                 .append("\nTCMB Euro efektif alış: ")
                 .append(kurBicimle(s.efektifAlis))
                 .append(" ₺");
 
-        String istenenTarih = String.format(Locale.ROOT, "%02d.%02d.%04d", seciliGun, ay + 1, yil);
         if (s.bultenTarihi != null && !s.bultenTarihi.equals(istenenTarih)) {
             yazi.append("\n(Bu gün kur yayımlanmadı; ")
                     .append(s.bultenTarihi)
@@ -243,6 +306,10 @@ public class MainActivity extends Activity {
                 DecimalFormatSymbols.getInstance(new Locale("tr", "TR")));
         bicim.setRoundingMode(RoundingMode.HALF_UP);
         return bicim.format(kur);
+    }
+
+    private static int anahtar(int yil, int ay, int gun) {
+        return yil * 10000 + (ay + 1) * 100 + gun;
     }
 
     private TextView hucre(String yazi) {

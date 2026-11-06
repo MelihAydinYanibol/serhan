@@ -1,6 +1,6 @@
 # Merhaba
 
-Açıldığında ekranda "Merhaba" ve içinde bulunulan ayın takvimini gösteren basit bir Android uygulaması. Bugünün tarihi mavi ile, hafta sonları kırmızı ile gösterilir.
+Açıldığında ekranda "Merhaba" ve içinde bulunulan ayın takvimini gösteren basit bir Android uygulaması. Ay başlığının yanındaki ‹ ve › butonlarıyla önceki aylara geçilebilir (içinde bulunulan aydan ileriye gidilmez). Bugünün tarihi mavi ile, hafta sonları kırmızı ile gösterilir.
 
 Takvimde bir güne dokunulduğunda, Türkiye Cumhuriyet Merkez Bankası'nın (TCMB) o gün için belirlediği
 **Euro efektif alış kuru** virgülden sonra en fazla 2 haneyle gösterilir. Kurlar
