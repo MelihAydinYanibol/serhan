@@ -1,6 +1,6 @@
 # Merhaba
 
-Açıldığında ekranda "Merhaba" yazan basit bir Android uygulaması.
+Açıldığında ekranda "Merhaba" ve içinde bulunulan ayın takvimini gösteren basit bir Android uygulaması. Bugünün tarihi mavi ile, hafta sonları kırmızı ile gösterilir.
 
 ## APK'yı indirme
 
